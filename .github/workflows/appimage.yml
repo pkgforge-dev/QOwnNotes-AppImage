@@ -4,11 +4,40 @@ concurrency:
   cancel-in-progress: true
 on:
   schedule:
-    - cron: "0 7 1/21 * *" # We default to rebuilding every 21 days, change this to your liking
+    - cron: "0 7 * * 1" # Check for new version every Monday
   workflow_dispatch: {}
 
 jobs:
+  check-version:
+    name: Check AUR version
+    runs-on: ubuntu-latest
+    outputs:
+      version_changed: ${{ steps.check.outputs.changed }}
+      aur_version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Compare AUR version with latest release
+        id: check
+        run: |
+          AUR_VERSION=$(curl -sL "https://aur.archlinux.org/rpc/v5/info?arg[]=qownnotes" \
+            | jq -r '.results[0].Version')
+          echo "AUR version: ${AUR_VERSION}"
+          echo "version=${AUR_VERSION}" >> "${GITHUB_OUTPUT}"
+          if [ -f ./LATEST_VERSION ]; then
+            LATEST=$(cat ./LATEST_VERSION | tr -d '[:space:]')
+            echo "Latest released: ${LATEST}"
+            if [ "${AUR_VERSION}" = "${LATEST}" ]; then
+              echo "Version unchanged, skipping build."
+              echo "changed=false" >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+          fi
+          echo "New version detected (or no previous release). Will build."
+          echo "changed=true" >> "${GITHUB_OUTPUT}"
+
   build:
+    needs: check-version
+    if: needs.check-version.outputs.version_changed == 'true'
     name: "${{ matrix.name }} (${{ matrix.arch }})"
     runs-on: ${{ matrix.runs-on }}
     strategy:
@@ -17,7 +46,6 @@ jobs:
           - runs-on: ubuntu-latest
             name: Build AppImage
             arch: x86_64
-          # comment out these 3 lines if aarch64 is not wanted
           - runs-on: ubuntu-24.04-arm
             name: Build AppImage
             arch: aarch64
@@ -42,9 +70,27 @@ jobs:
     permissions: write-all
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           pattern: AppImage-*
           merge-multiple: true
       - name: Release AppImage
-        uses: pkgforge-dev/make-stable-appimage-release@4ed3d48ccb065352b6e6c0db6d39885b201c54a0 #v1.1
+        uses: softprops/action-gh-release@5be0e66d93ac7ed76da52eca8bb058f665c3a5fe # v2.4.2
+        with:
+          name: "QOwnNotes: ${{ needs.check-version.outputs.aur_version }}"
+          tag_name: "${{ needs.check-version.outputs.aur_version }}"
+          prerelease: false
+          draft: false
+          generate_release_notes: false
+          make_latest: true
+          files: |
+            *.AppImage*
+      - name: Update LATEST_VERSION
+        run: |
+          echo "${{ needs.check-version.outputs.aur_version }}" > ./LATEST_VERSION
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add ./LATEST_VERSION
+          git commit --allow-empty -m 'bump `LATEST_VERSION` [skip ci]'
+          git push
