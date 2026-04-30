@@ -76,7 +76,7 @@ jobs:
           pattern: AppImage-*
           merge-multiple: true
       - name: Release AppImage
-        uses: softprops/action-gh-release@5be0e66d93ac7ed76da52eca8bb058f665c3a5fe # v2.4.2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           name: "QOwnNotes: ${{ needs.check-version.outputs.aur_version }}"
           tag_name: "${{ needs.check-version.outputs.aur_version }}"
